@@ -1,4 +1,4 @@
-// Media Seekbar — GNOME Shell 50
+// Media Seekbar — GNOME Shell 48–50
 // Injects a seekbar with elapsed/total time into the media controls
 // (MediaMessage) shown in the date menu. Position is polled because MPRIS
 // doesn't notify Position changes; seeking uses SetPosition (or Seek).
@@ -41,14 +41,44 @@ function formatTime(micros) {
 
 const MediaSeekBar = GObject.registerClass(
 class MediaSeekBar extends St.BoxLayout {
-    _init(player) {
+    // Live bars, so disable() can tear them all down.
+    static _instances = new Set();
+
+    // Create (or just sync) the bar that belongs to a media message.
+    static ensureOn(message) {
+        if (!message?._player)
+            return;
+        if (message._mediaSeekBar) {
+            message._mediaSeekBar.sync();
+            return;
+        }
+        message._mediaSeekBar = new MediaSeekBar(message);
+    }
+
+    // Media messages that already existed before the extension was enabled.
+    static patchExisting() {
+        const playerToMessage =
+            Main.panel.statusArea.dateMenu?._messageList?._messageView?._playerToMessage;
+        if (!playerToMessage)
+            return;
+        for (const message of playerToMessage.values())
+            MediaSeekBar.ensureOn(message);
+    }
+
+    static destroyAll() {
+        for (const bar of [...MediaSeekBar._instances])
+            bar.destroy();
+    }
+
+    _init(message) {
         super._init({
             style_class: 'media-seek-bar',
             orientation: Clutter.Orientation.HORIZONTAL,
             x_expand: true,
         });
 
-        this._player = player;
+        this._message = message;
+        this._player = message._player;
         this._length = 0;          // microseconds
         this._lastPosition = 0;    // microseconds
         this._trackId = null;
@@ -58,6 +88,7 @@ class MediaSeekBar extends St.BoxLayout {
         this._timerId = 0;
         this._seekTimeoutId = 0;
         this._cancellable = new Gio.Cancellable();
+        MediaSeekBar._instances.add(this);
 
         const timeLabel = xAlign => new St.Label({
             style_class: 'media-seek-time', text: '0:00',
@@ -74,25 +105,37 @@ class MediaSeekBar extends St.BoxLayout {
         this.add_child(this._slider);
         this.add_child(this._durationLabel);
 
-        this._slider.connect('drag-begin', () => {
-            this._dragging = true;
-        });
-        this._slider.connect('drag-end', () => {
-            this._dragging = false;
-            this._seekToFraction(this._slider.value);
-        });
         // Scroll and keyboard change the value without drag-begin/end.
-        this._slider.connect('notify::value', () => {
-            if (this._settingValue || this._dragging)
-                return;
-            this._queueSeek();
-        });
+        this._slider.connectObject(
+            'drag-begin', () => {
+                this._dragging = true;
+            },
+            'drag-end', () => {
+                this._dragging = false;
+                this._seekToFraction(this._slider.value);
+            },
+            'notify::value', () => {
+                if (this._settingValue || this._dragging)
+                    return;
+                this._queueSeek();
+            },
+            this);
 
-        this._playerChangedId = this._player.connect('changed', () => this.sync());
+        this._player.connectObject('changed', () => this.sync(), this);
 
-        this.connect('destroy', this._onDestroy.bind(this));
-
+        this._attach(message);
         this.sync();
+    }
+
+    // Insert just above the action area so the bar is always visible.
+    _attach(message) {
+        const vbox = message.get_child?.();
+        if (vbox && message._actionBin && vbox.contains(message._actionBin))
+            vbox.insert_child_below(this, message._actionBin);
+        else if (vbox)
+            vbox.add_child(this);
+        else
+            message.setActionArea(this);
     }
 
     get _proxy() {
@@ -223,7 +266,7 @@ class MediaSeekBar extends St.BoxLayout {
         this._positionLabel.text = formatTime(target);
     }
 
-    _onDestroy() {
+    destroy() {
         this._stopTimer();
         if (this._seekTimeoutId) {
             GLib.source_remove(this._seekTimeoutId);
@@ -231,79 +274,35 @@ class MediaSeekBar extends St.BoxLayout {
         }
         this._cancellable?.cancel();
         this._cancellable = null;
-        if (this._player && this._playerChangedId) {
-            this._player.disconnect(this._playerChangedId);
-            this._playerChangedId = 0;
-        }
+        this._player?.disconnectObject(this);
         this._player = null;
+        MediaSeekBar._instances.delete(this);
+        if (this._message?._mediaSeekBar === this)
+            this._message._mediaSeekBar = null;
+        this._message = null;
+        super.destroy();
     }
 });
 
 export default class MediaSeekbarExtension extends Extension {
     enable() {
-        this._seekBars = new Set();
         this._injectionManager = new InjectionManager();
 
         // MediaMessage calls _update() on build and on every player change;
         // ensure the seekbar exists and is synced there.
         this._injectionManager.overrideMethod(
             MessageList.MediaMessage.prototype, '_update',
-            originalMethod => {
-                const extension = this;
-                return function (...args) {
-                    originalMethod.call(this, ...args);
-                    extension._ensureSeekBar(this);
-                };
+            originalMethod => function (...args) {
+                originalMethod.call(this, ...args);
+                MediaSeekBar.ensureOn(this);
             });
 
-        // Media messages that already existed before enabling.
-        this._patchExistingMessages();
+        MediaSeekBar.patchExisting();
     }
 
     disable() {
         this._injectionManager?.clear();
         this._injectionManager = null;
-        // destroy() fires each bar's handler, which removes it from the set.
-        this._seekBars?.forEach(bar => bar.destroy());
-        this._seekBars = null;
-    }
-
-    _patchExistingMessages() {
-        const messageView =
-            Main.panel.statusArea.dateMenu?._messageList?._messageView;
-        const playerToMessage = messageView?._playerToMessage;
-        if (!playerToMessage)
-            return;
-        for (const message of playerToMessage.values())
-            this._ensureSeekBar(message);
-    }
-
-    _ensureSeekBar(message) {
-        if (!message?._player)
-            return;
-
-        if (message._mediaSeekBar) {
-            message._mediaSeekBar.sync();
-            return;
-        }
-
-        const seekBar = new MediaSeekBar(message._player);
-        message._mediaSeekBar = seekBar;
-        this._seekBars.add(seekBar);
-
-        seekBar.connect('destroy', () => {
-            this._seekBars?.delete(seekBar);
-            if (message._mediaSeekBar === seekBar)
-                message._mediaSeekBar = null;
-        });
-
-        // Insert just above the action area so the bar is always visible.
-        const vbox = message.get_child?.();
-        if (vbox && message._actionBin && vbox.contains(message._actionBin))
-            vbox.insert_child_below(seekBar, message._actionBin);
-        else if (vbox)
-            vbox.add_child(seekBar);
-        else
-            message.setActionArea(seekBar);
+        MediaSeekBar.destroyAll();
     }
 }
