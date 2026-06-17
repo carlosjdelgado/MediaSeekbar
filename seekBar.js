@@ -13,8 +13,8 @@ const PLAYER_IFACE = 'org.mpris.MediaPlayer2.Player';
 const MprisPlayerProxy = Gio.DBusProxy.makeProxyWrapper(loadInterfaceXML(PLAYER_IFACE));
 
 // m:ss / h:mm:ss vía Date (correcto < 24 h, suficiente para cualquier medio)
-const formatTime = micros =>
-    new Date(Math.max(0, micros) / 1000).toISOString().slice(11, 19).replace(/^0(?:0:0?)?/, '');
+const formatTime = microseconds =>
+    new Date(Math.max(0, microseconds) / 1000).toISOString().slice(11, 19).replace(/^0(?:0:0?)?/, '');
 
 export class SeekBarManager {
     constructor(messages) {
@@ -24,19 +24,19 @@ export class SeekBarManager {
     }
 
     _addBar(message) {
-        const name = message._player?._busName;
-        if (!name || this.bars[name])
+        const busName = message._player?._busName;
+        if (!busName || this.bars[busName])
             return;
 
-        const bar = new SeekBar(name);
+        const bar = new SeekBar(busName);
         message.get_child().add_child(bar);
-        this.bars[name] = bar;
+        this.bars[busName] = bar;
     }
 
     destroy() {
-        for (const name in this.bars) {
-            this.bars[name].destroy();
-            delete this.bars[name];
+        for (const busName in this.bars) {
+            this.bars[busName].destroy();
+            delete this.bars[busName];
         }
     }
 }
@@ -48,21 +48,29 @@ class SeekBar extends St.BoxLayout {
 
         this._busName = busName;
         this._length = 0;
+        this._trackId = null;
+        this._canSeek = false;
+        this._dragging = false;
         this._timerId = 0;
 
-        const label = () => new St.Label({
+        const timeLabel = () => new St.Label({
             style_class: 'seek-timestamp', text: '0:00',
             y_align: Clutter.ActorAlign.CENTER,
         });
-        this._position = label();
+        this._positionLabel = timeLabel();
         this._slider = new Slider(0);
         this._slider.x_expand = true;
         this._slider.y_align = Clutter.ActorAlign.CENTER;
-        this._duration = label();
+        this._slider.connect('drag-begin', () => (this._dragging = true));
+        this._slider.connect('drag-end', () => {
+            this._dragging = false;
+            this._seek(this._slider.value);
+        });
+        this._durationLabel = timeLabel();
 
-        this.add_child(this._position);
+        this.add_child(this._positionLabel);
         this.add_child(this._slider);
-        this.add_child(this._duration);
+        this.add_child(this._durationLabel);
 
         this._proxy = MprisPlayerProxy(Gio.DBus.session, busName, MPRIS_PATH,
             () => this._onProxyReady());
@@ -83,25 +91,49 @@ class SeekBar extends St.BoxLayout {
     }
 
     _updateInfo() {
-        const length = this._proxy.Metadata?.['mpris:length'];
-        this._length = Number(length?.deepUnpack?.() ?? length) || 0;
+        const metadata = this._proxy.Metadata ?? {};
+        const rawLength = metadata['mpris:length'];
+        this._length = Number(rawLength?.deepUnpack?.() ?? rawLength) || 0;
+        this._trackId = metadata['mpris:trackid']?.deepUnpack?.() ?? null;
         this.visible = this._length > 0;
-        this._duration.text = formatTime(this._length);
+        this._durationLabel.text = formatTime(this._length);
+        // CanSeek no siempre está en la caché del proxy (VLC), léelo en vivo.
+        this._getProperty('CanSeek', canSeek => {
+            this._canSeek = !!canSeek;
+            this._slider.reactive = this._canSeek;
+        });
     }
 
-    // Position is omitted from PropertiesChanged, so read it live while playing.
-    _updatePosition() {
-        if (this._proxy.PlaybackStatus !== 'Playing' || this._length <= 0)
+    // SetPosition no está en el XML del shell, así que se llama en crudo.
+    _seek(fraction) {
+        if (!this._canSeek || !this._trackId || this._length <= 0)
             return;
+        const targetMicros = Math.floor(fraction * this._length);
+        this._proxy.get_connection().call(
+            this._busName, MPRIS_PATH, PLAYER_IFACE, 'SetPosition',
+            new GLib.Variant('(ox)', [this._trackId, targetMicros]),
+            null, Gio.DBusCallFlags.NONE, -1, null, null);
+    }
+
+    // Position no llega por PropertiesChanged: hay que leerla en vivo.
+    _updatePosition() {
+        if (this._dragging || this._proxy.PlaybackStatus !== 'Playing' || this._length <= 0)
+            return;
+        this._getProperty('Position', position => {
+            this._positionLabel.text = formatTime(position);
+            this._slider.value = Math.min(Math.max(position / this._length, 0), 1);
+        });
+    }
+
+    // Lee una propiedad MPRIS en vivo (la caché del proxy puede estar vacía u obsoleta).
+    _getProperty(property, onValue) {
         this._proxy.get_connection().call(
             this._busName, MPRIS_PATH, 'org.freedesktop.DBus.Properties', 'Get',
-            new GLib.Variant('(ss)', [PLAYER_IFACE, 'Position']),
+            new GLib.Variant('(ss)', [PLAYER_IFACE, property]),
             new GLib.VariantType('(v)'), Gio.DBusCallFlags.NONE, -1, null,
-            (conn, res) => {
+            (connection, result) => {
                 try {
-                    const [pos] = conn.call_finish(res).recursiveUnpack();
-                    this._position.text = formatTime(pos);
-                    this._slider.value = Math.min(Math.max(pos / this._length, 0), 1);
+                    onValue(connection.call_finish(result).recursiveUnpack()[0]);
                 } catch {}
             });
     }
