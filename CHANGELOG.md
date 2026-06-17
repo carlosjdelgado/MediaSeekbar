@@ -9,11 +9,14 @@ extension's `version-name`.
 ### Changed
 - Use `connectObject()`/`disconnectObject()` for all signal handling so cleanup
   is easier to track.
-- Move the media-message attach and lifecycle logic into the `MediaSeekBar`
-  class (`ensureOn`/`patchExisting`/`destroyAll`); the extension entry point is
-  now just `enable()`/`disable()`.
-- Replace `_onDestroy()` with a proper `destroy()` override calling
-  `super.destroy()`.
+- Keep the attach/lifecycle logic as instance methods on the extension
+  (`_ensureOn`/`_mediaMessages`); each bar is stored on its media message and
+  `destroy()`ed individually on `disable()`.
+
+### Fixed
+- Tear down the polling timer and D-Bus call when the player goes away and the
+  shell destroys the parent message: clean-up now runs from the actor's
+  `'destroy'` signal too, not only the explicit `destroy()` path.
 
 ### Removed
 - `license` field from `metadata.json` (not part of the metadata schema).

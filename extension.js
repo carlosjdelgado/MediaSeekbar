@@ -22,16 +22,6 @@ function clamp(value, min, max) {
     return Math.min(Math.max(value, min), max);
 }
 
-// 'mpris:length' is int64 ('x') per spec but some clients (Spotify) send
-// uint64 ('t'); deepUnpack() handles both (bigint or number).
-function variantToNumber(variant) {
-    try {
-        return Number(variant?.deepUnpack()) || 0;
-    } catch (e) {
-        return 0;
-    }
-}
-
 function formatTime(micros) {
     const t = Math.max(0, Math.floor(micros / 1_000_000)) || 0;
     const pad = n => String(n).padStart(2, '0');
@@ -41,35 +31,6 @@ function formatTime(micros) {
 
 const MediaSeekBar = GObject.registerClass(
 class MediaSeekBar extends St.BoxLayout {
-    // Live bars, so disable() can tear them all down.
-    static _instances = new Set();
-
-    // Create (or just sync) the bar that belongs to a media message.
-    static ensureOn(message) {
-        if (!message?._player)
-            return;
-        if (message._mediaSeekBar) {
-            message._mediaSeekBar.sync();
-            return;
-        }
-        message._mediaSeekBar = new MediaSeekBar(message);
-    }
-
-    // Media messages that already existed before the extension was enabled.
-    static patchExisting() {
-        const playerToMessage =
-            Main.panel.statusArea.dateMenu?._messageList?._messageView?._playerToMessage;
-        if (!playerToMessage)
-            return;
-        for (const message of playerToMessage.values())
-            MediaSeekBar.ensureOn(message);
-    }
-
-    static destroyAll() {
-        for (const bar of [...MediaSeekBar._instances])
-            bar.destroy();
-    }
-
     _init(message) {
         super._init({
             style_class: 'media-seek-bar',
@@ -88,7 +49,6 @@ class MediaSeekBar extends St.BoxLayout {
         this._timerId = 0;
         this._seekTimeoutId = 0;
         this._cancellable = new Gio.Cancellable();
-        MediaSeekBar._instances.add(this);
 
         const timeLabel = xAlign => new St.Label({
             style_class: 'media-seek-time', text: '0:00',
@@ -123,12 +83,11 @@ class MediaSeekBar extends St.BoxLayout {
 
         this._player.connectObject('changed', () => this.sync(), this);
 
-        this._attach(message);
-        this.sync();
-    }
+        // Clean up on both paths: explicit destroy() in disable(), and the
+        // shell destroying the parent message when the player goes away.
+        this.connect('destroy', () => this._onDestroy());
 
-    // Insert just above the action area so the bar is always visible.
-    _attach(message) {
+        // Insert just above the action area so the bar is always visible.
         const vbox = message.get_child?.();
         if (vbox && message._actionBin && vbox.contains(message._actionBin))
             vbox.insert_child_below(this, message._actionBin);
@@ -136,6 +95,8 @@ class MediaSeekBar extends St.BoxLayout {
             vbox.add_child(this);
         else
             message.setActionArea(this);
+
+        this.sync();
     }
 
     get _proxy() {
@@ -150,10 +111,11 @@ class MediaSeekBar extends St.BoxLayout {
         const proxy = this._proxy;
         const meta = proxy?.Metadata ?? {};
 
-        this._length = variantToNumber(meta['mpris:length']);
-
-        const trackIdVariant = meta['mpris:trackid'];
-        this._trackId = trackIdVariant ? trackIdVariant.deepUnpack() : null;
+        // 'mpris:length' is int64 ('x') per spec but some clients (Spotify)
+        // send uint64 ('t'); deepUnpack() is type-agnostic, || 0 covers
+        // missing/odd values.
+        this._length = Number(meta['mpris:length']?.deepUnpack()) || 0;
+        this._trackId = meta['mpris:trackid']?.deepUnpack() ?? null;
 
         // CanSeek isn't on the shell's proxy; read it over D-Bus directly.
         this._fetchCanSeek();
@@ -202,7 +164,7 @@ class MediaSeekBar extends St.BoxLayout {
             (source, result) => {
                 try {
                     onReply?.(source.call_finish(result));
-                } catch (e) {}
+                } catch {}
             });
     }
 
@@ -266,7 +228,8 @@ class MediaSeekBar extends St.BoxLayout {
         this._positionLabel.text = formatTime(target);
     }
 
-    destroy() {
+    // Idempotent: runs from both destroy() and the 'destroy' signal.
+    _onDestroy() {
         this._stopTimer();
         if (this._seekTimeoutId) {
             GLib.source_remove(this._seekTimeoutId);
@@ -276,10 +239,13 @@ class MediaSeekBar extends St.BoxLayout {
         this._cancellable = null;
         this._player?.disconnectObject(this);
         this._player = null;
-        MediaSeekBar._instances.delete(this);
         if (this._message?._mediaSeekBar === this)
             this._message._mediaSeekBar = null;
         this._message = null;
+    }
+
+    destroy() {
+        this._onDestroy();
         super.destroy();
     }
 });
@@ -290,19 +256,42 @@ export default class MediaSeekbarExtension extends Extension {
 
         // MediaMessage calls _update() on build and on every player change;
         // ensure the seekbar exists and is synced there.
+        const extension = this;
         this._injectionManager.overrideMethod(
             MessageList.MediaMessage.prototype, '_update',
             originalMethod => function (...args) {
                 originalMethod.call(this, ...args);
-                MediaSeekBar.ensureOn(this);
+                extension._ensureOn(this);
             });
 
-        MediaSeekBar.patchExisting();
+        for (const message of this._mediaMessages())
+            this._ensureOn(message);
+    }
+
+    // The shell's live media messages (one per MPRIS player).
+    _mediaMessages() {
+        const playerToMessage =
+            Main.panel.statusArea.dateMenu?._messageList?._messageView?._playerToMessage;
+        return playerToMessage ? [...playerToMessage.values()] : [];
+    }
+
+    // Create (or just sync) the bar that belongs to a media message.
+    _ensureOn(message) {
+        if (!message?._player)
+            return;
+        if (message._mediaSeekBar)
+            message._mediaSeekBar.sync();
+        else
+            message._mediaSeekBar = new MediaSeekBar(message);
     }
 
     disable() {
         this._injectionManager?.clear();
         this._injectionManager = null;
-        MediaSeekBar.destroyAll();
+        // Destroy the bars still attached to live messages (each fires its
+        // 'destroy' handler to drop timers and signals). Bars on messages that
+        // already went away were destroyed with their message the same way.
+        for (const message of this._mediaMessages())
+            message._mediaSeekBar?.destroy();
     }
 }
