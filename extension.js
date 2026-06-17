@@ -6,7 +6,7 @@ import {SeekBarManager} from './seekBar.js';
 export default class MediaSeekbar extends Extension {
     enable() {
         const messageView = Main.panel.statusArea.dateMenu._messageList._messageView;
-        this._manager = new SeekBarManager(messageView.messages);
+        this._manager = new SeekBarManager(messageView);
     }
 
     disable() {

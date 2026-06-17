@@ -17,27 +17,61 @@ const formatTime = microseconds =>
     new Date(Math.max(0, microseconds) / 1000).toISOString().slice(11, 19).replace(/^0(?:0:0?)?/, '');
 
 export class SeekBarManager {
-    constructor(messages) {
+    constructor(messageView) {
+        this._messageView = messageView;
         this.bars = {};
-        for (const message of messages)
-            this._addBar(message);
+        this._syncId = 0;
+
+        this._sync();
+
+        // Players MPRIS que entran/salen: NameOwnerChanged es API estable del bus.
+        this._nameOwnerId = Gio.DBus.session.signal_subscribe(
+            'org.freedesktop.DBus', 'org.freedesktop.DBus', 'NameOwnerChanged',
+            '/org/freedesktop/DBus', 'org.mpris.MediaPlayer2',
+            Gio.DBusSignalFlags.MATCH_ARG0_NAMESPACE,
+            () => this._queueSync());
     }
 
-    _addBar(message) {
-        const busName = message._player?._busName;
-        if (!busName || this.bars[busName])
+    // El shell crea/destruye el MediaMessage de forma diferida tras el cambio de
+    // nombre, así que se reescanea con un pequeño retardo (y se agrupan ráfagas).
+    _queueSync() {
+        if (this._syncId)
             return;
+        this._syncId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 500, () => {
+            this._syncId = 0;
+            this._sync();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
 
-        const bar = new SeekBar(busName);
-        message.get_child().add_child(bar);
-        this.bars[busName] = bar;
+    _sync() {
+        const present = new Set();
+        for (const message of this._messageView.messages) {
+            const busName = message._player?._busName;
+            if (!busName)
+                continue;
+            present.add(busName);
+            if (!this.bars[busName]) {
+                const bar = new SeekBar(busName);
+                message.get_child().add_child(bar);
+                this.bars[busName] = bar;
+            }
+        }
+        // El shell ya destruyó las barras de players que se fueron (con su
+        // message); solo queda soltar la referencia.
+        for (const busName in this.bars) {
+            if (!present.has(busName))
+                delete this.bars[busName];
+        }
     }
 
     destroy() {
-        for (const busName in this.bars) {
-            this.bars[busName].destroy();
-            delete this.bars[busName];
-        }
+        if (this._syncId)
+            GLib.source_remove(this._syncId);
+        if (this._nameOwnerId)
+            Gio.DBus.session.signal_unsubscribe(this._nameOwnerId);
+        for (const bar of Object.values(this.bars))
+            bar.destroy();
     }
 }
 
@@ -85,7 +119,8 @@ class SeekBar extends St.BoxLayout {
         this._proxy.connectObject('g-properties-changed', () => this._updateInfo(), this);
         this._updateInfo();
         this._timerId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1000, () => {
-            this._updatePosition();
+            if (this._proxy.PlaybackStatus === 'Playing')
+                this._refreshPosition();
             return GLib.SOURCE_CONTINUE;
         });
     }
@@ -102,6 +137,8 @@ class SeekBar extends St.BoxLayout {
             this._canSeek = !!canSeek;
             this._slider.reactive = this._canSeek;
         });
+        // Refresca la posición también en pausa (al abrir o cambiar de pista).
+        this._refreshPosition();
     }
 
     // SetPosition no está en el XML del shell, así que se llama en crudo.
@@ -116,8 +153,8 @@ class SeekBar extends St.BoxLayout {
     }
 
     // Position no llega por PropertiesChanged: hay que leerla en vivo.
-    _updatePosition() {
-        if (this._dragging || this._proxy.PlaybackStatus !== 'Playing' || this._length <= 0)
+    _refreshPosition() {
+        if (this._dragging || this._length <= 0)
             return;
         this._getProperty('Position', position => {
             this._positionLabel.text = formatTime(position);
