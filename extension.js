@@ -22,31 +22,21 @@ function clamp(value, min, max) {
     return Math.min(Math.max(value, min), max);
 }
 
-// Spec says 'mpris:length' is int64 ('x'), but some clients (Spotify) send
-// uint64 ('t'); deepUnpack() handles both, then normalize to Number.
+// 'mpris:length' is int64 ('x') per spec but some clients (Spotify) send
+// uint64 ('t'); deepUnpack() handles both (bigint or number).
 function variantToNumber(variant) {
-    if (!variant)
-        return 0;
     try {
-        const value = variant.deepUnpack();
-        return typeof value === 'bigint' ? Number(value) : Number(value) || 0;
+        return Number(variant?.deepUnpack()) || 0;
     } catch (e) {
         return 0;
     }
 }
 
 function formatTime(micros) {
-    if (!Number.isFinite(micros) || micros < 0)
-        micros = 0;
-    let secs = Math.floor(micros / 1_000_000);
-    const hours = Math.floor(secs / 3600);
-    secs -= hours * 3600;
-    const mins = Math.floor(secs / 60);
-    secs -= mins * 60;
+    const t = Math.max(0, Math.floor(micros / 1_000_000)) || 0;
     const pad = n => String(n).padStart(2, '0');
-    return hours > 0
-        ? `${hours}:${pad(mins)}:${pad(secs)}`
-        : `${mins}:${pad(secs)}`;
+    const h = Math.floor(t / 3600), m = Math.floor(t / 60) % 60, s = t % 60;
+    return h ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
 }
 
 const MediaSeekBar = GObject.registerClass(
@@ -69,22 +59,16 @@ class MediaSeekBar extends St.BoxLayout {
         this._seekTimeoutId = 0;
         this._cancellable = new Gio.Cancellable();
 
-        this._positionLabel = new St.Label({
-            style_class: 'media-seek-time',
-            text: '0:00',
-            x_align: Clutter.ActorAlign.START,
-            y_align: Clutter.ActorAlign.CENTER,
+        const timeLabel = xAlign => new St.Label({
+            style_class: 'media-seek-time', text: '0:00',
+            x_align: xAlign, y_align: Clutter.ActorAlign.CENTER,
         });
+        this._positionLabel = timeLabel(Clutter.ActorAlign.START);
         this._slider = new Slider(0);
         this._slider.add_style_class_name('media-seek-slider');
         this._slider.x_expand = true;
         this._slider.y_align = Clutter.ActorAlign.CENTER;
-        this._durationLabel = new St.Label({
-            style_class: 'media-seek-time',
-            text: '0:00',
-            x_align: Clutter.ActorAlign.END,
-            y_align: Clutter.ActorAlign.CENTER,
-        });
+        this._durationLabel = timeLabel(Clutter.ActorAlign.END);
 
         this.add_child(this._positionLabel);
         this.add_child(this._slider);
@@ -163,60 +147,27 @@ class MediaSeekBar extends St.BoxLayout {
         }
     }
 
-    // Read a Player property over D-Bus. The shell's proxy only exposes a few
-    // members, so Position/CanSeek and the seek methods aren't on it.
-    _getPlayerProperty(prop, callback) {
+    // Raw D-Bus call: the shell's proxy lacks Position/CanSeek/Seek/SetPosition.
+    // Errors are ignored (cancelled on destroy, or the player went away).
+    _dbus(iface, method, params, replyType, onReply) {
         const proxy = this._proxy;
         if (!proxy)
             return;
-
         proxy.get_connection().call(
-            proxy.get_name(),
-            proxy.get_object_path(),
-            'org.freedesktop.DBus.Properties',
-            'Get',
-            new GLib.Variant('(ss)', [PLAYER_IFACE, prop]),
-            new GLib.VariantType('(v)'),
-            Gio.DBusCallFlags.NONE,
-            -1,
-            this._cancellable,
+            proxy.get_name(), proxy.get_object_path(), iface, method, params,
+            replyType, Gio.DBusCallFlags.NONE, -1, this._cancellable,
             (source, result) => {
-                let reply;
                 try {
-                    reply = source.call_finish(result);
-                } catch (e) {
-                    // Cancelled on destroy, or the player went away: ignore.
-                    return;
-                }
-                const [value] = reply.recursiveUnpack();
-                callback(value);
+                    onReply?.(source.call_finish(result));
+                } catch (e) {}
             });
     }
 
-    // Call a Player method over D-Bus (Seek/SetPosition aren't on the proxy).
-    _callPlayerMethod(method, paramsVariant) {
-        const proxy = this._proxy;
-        if (!proxy)
-            return;
-
-        proxy.get_connection().call(
-            proxy.get_name(),
-            proxy.get_object_path(),
-            PLAYER_IFACE,
-            method,
-            paramsVariant,
-            null,
-            Gio.DBusCallFlags.NONE,
-            -1,
-            this._cancellable,
-            (source, result) => {
-                try {
-                    source.call_finish(result);
-                } catch (e) {
-                    if (!e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
-                        logError(e, `MediaSeekbar: ${method} failed`);
-                }
-            });
+    _getPlayerProperty(prop, callback) {
+        this._dbus('org.freedesktop.DBus.Properties', 'Get',
+            new GLib.Variant('(ss)', [PLAYER_IFACE, prop]),
+            new GLib.VariantType('(v)'),
+            reply => callback(reply.recursiveUnpack()[0]));
     }
 
     _fetchCanSeek() {
@@ -262,15 +213,11 @@ class MediaSeekBar extends St.BoxLayout {
 
         const target = Math.floor(clamp(fraction, 0, 1) * this._length);
 
-        if (this._trackId) {
-            // Absolute SetPosition(trackid, pos) avoids accumulating error.
-            this._callPlayerMethod('SetPosition',
-                new GLib.Variant('(ox)', [this._trackId, target]));
-        } else {
-            // Relative fallback when the trackid is unknown.
-            this._callPlayerMethod('Seek',
-                new GLib.Variant('(x)', [target - this._lastPosition]));
-        }
+        // Absolute SetPosition avoids drift; relative Seek is the fallback.
+        if (this._trackId)
+            this._dbus(PLAYER_IFACE, 'SetPosition', new GLib.Variant('(ox)', [this._trackId, target]), null);
+        else
+            this._dbus(PLAYER_IFACE, 'Seek', new GLib.Variant('(x)', [target - this._lastPosition]), null);
 
         this._lastPosition = target;
         this._positionLabel.text = formatTime(target);
@@ -316,13 +263,9 @@ export default class MediaSeekbarExtension extends Extension {
     disable() {
         this._injectionManager?.clear();
         this._injectionManager = null;
-
-        if (this._seekBars) {
-            for (const seekBar of [...this._seekBars])
-                seekBar.destroy();
-            this._seekBars.clear();
-            this._seekBars = null;
-        }
+        // destroy() fires each bar's handler, which removes it from the set.
+        this._seekBars?.forEach(bar => bar.destroy());
+        this._seekBars = null;
     }
 
     _patchExistingMessages() {
