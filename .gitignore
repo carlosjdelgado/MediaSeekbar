@@ -1,6 +1,9 @@
 # Claude Code workspace
 .claude/
 
+# Build output
+dist/
+
 # Editor / OS cruft
 *.swp
 *~
