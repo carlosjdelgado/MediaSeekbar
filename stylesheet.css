@@ -1,0 +1,19 @@
+.media-seek-bar {
+    spacing: 8px;
+    margin-top: 6px;
+    margin-bottom: 2px;
+    /* Match .message-box's 6px horizontal padding so times align with it. */
+    margin-left: 6px;
+    margin-right: 6px;
+}
+
+.media-seek-bar .media-seek-time {
+    font-size: 0.85em;
+    min-width: 40px;
+    /* Tabular figures so the times don't jitter. */
+    font-feature-settings: "tnum";
+}
+
+.media-seek-bar .media-seek-slider {
+    min-height: 16px;
+}
