@@ -20,4 +20,4 @@ cp metadata.json extension.js stylesheet.css LICENSE "${STAGE_DIR}/"
 
 ( cd "${STAGE_DIR}" && zip -qr "${OUT_ZIP}" . )
 
-echo "Package ready: ${OUT_ZIP}"
+echo "Package ${UUID} ready: ${OUT_ZIP}"
