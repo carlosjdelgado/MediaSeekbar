@@ -84,6 +84,8 @@ export class SeekBar extends St.BoxLayout {
         this._canSeek = false;
         this._dragging = false;
         this._timerId = 0;
+        this._basePosition = 0;
+        this._baseAt = GLib.get_monotonic_time();
 
         const timeLabel = () => new St.Label({
             style_class: 'seek-timestamp', text: '0:00',
@@ -100,7 +102,6 @@ export class SeekBar extends St.BoxLayout {
         this._slider.connect('drag-end', () => {
             this._dragging = false;
             this._seek(this._slider.value);
-            this._positionLabel.text = formatTime(this._slider.value * this._length);
         });
         this._durationLabel = timeLabel();
 
@@ -113,7 +114,7 @@ export class SeekBar extends St.BoxLayout {
         this.connect('destroy', () => {
             if (this._timerId)
                 GLib.source_remove(this._timerId);
-            this._proxy?.disconnectObject(this);
+            this._proxy.disconnectObject(this);
         });
     }
 
@@ -122,7 +123,7 @@ export class SeekBar extends St.BoxLayout {
         this._updateInfo();
         this._timerId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1000, () => {
             if (this._proxy.PlaybackStatus === 'Playing')
-                this._refreshPosition();
+                this._renderPosition();
             return GLib.SOURCE_CONTINUE;
         });
     }
@@ -138,8 +139,7 @@ export class SeekBar extends St.BoxLayout {
             this._canSeek = Boolean(canSeek);
             this._slider.reactive = this._canSeek;
         });
-        if (this._proxy.PlaybackStatus !== 'Playing')
-            this._refreshPosition();
+        this._resync();
     }
 
     // SetPosition isn't in the shell's XML
@@ -151,15 +151,30 @@ export class SeekBar extends St.BoxLayout {
             this._busName, MPRIS_PATH, PLAYER_IFACE, 'SetPosition',
             new GLib.Variant('(ox)', [this._trackId, targetMicros]),
             null, Gio.DBusCallFlags.NONE, -1, null, null);
+        this._basePosition = targetMicros;
+        this._baseAt = GLib.get_monotonic_time();
+        this._renderPosition();
     }
 
-    // Position isn't in PropertiesChanged
-    _refreshPosition() {
+    _renderPosition() {
         if (this._dragging || this._length <= 0)
             return;
+        const elapsed = this._proxy.PlaybackStatus === 'Playing'
+            ? GLib.get_monotonic_time() - this._baseAt
+            : 0;
+        const position = this._basePosition + elapsed;
+        this._positionLabel.text = formatTime(position);
+        this._slider.value = Math.min(Math.max(position / this._length, 0), 1);
+    }
+
+    // Position isn't in PropertiesChanged: pull it from DBus and snapshot
+    _resync() {
+        if (this._length <= 0)
+            return;
         this._forwardProperty('Position', position => {
-            this._positionLabel.text = formatTime(position);
-            this._slider.value = Math.min(Math.max(position / this._length, 0), 1);
+            this._basePosition = position;
+            this._baseAt = GLib.get_monotonic_time();
+            this._renderPosition();
         });
     }
 
