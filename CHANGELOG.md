@@ -4,22 +4,15 @@ All notable changes to this project are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/), versions follow the
 extension's `version-name`.
 
-## [1.0.1]
+## [1.1.0]
 
 ### Changed
-- Use `connectObject()`/`disconnectObject()` for all signal handling so cleanup
-  is easier to track.
-- Keep the attach/lifecycle logic as instance methods on the extension
-  (`_ensureOn`/`_mediaMessages`); each bar is stored on its media message and
-  `destroy()`ed individually on `disable()`.
-
-### Fixed
-- Tear down the polling timer and D-Bus call when the player goes away and the
-  shell destroys the parent message: clean-up now runs from the actor's
-  `'destroy'` signal too, not only the explicit `destroy()` path.
-
-### Removed
-- `license` field from `metadata.json` (not part of the metadata schema).
+- Rewritten implementation: drops the `MediaMessage._update()` override
+  (`InjectionManager`) in favour of subscribing to the message view directly
+  and to the session bus' `NameOwnerChanged` for player tracking.
+- Position display is now driven by a local monotonic clock and only resynced
+  from D-Bus on state/metadata changes, avoiding the jitter caused by polling
+  latency.
 
 ## [1.0.0]
 

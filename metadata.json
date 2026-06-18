@@ -3,6 +3,6 @@
   "name": "Media Seekbar",
   "description": "Adds a progress/seek bar with elapsed and total time to the media playback controls in the notifications (date menu). Drag to seek on tracks that support seeking via MPRIS.",
   "shell-version": ["48", "49", "50"],
-  "version-name": "1.0.1",
+  "version-name": "1.1.0",
   "url": "https://github.com/carlosjdelgado/MediaSeekbar"
 }
