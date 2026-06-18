@@ -16,7 +16,7 @@ cd "${SRC_DIR}"
 rm -rf "${BUILD_DIR}"
 mkdir -p "${STAGE_DIR}"
 
-cp metadata.json extension.js stylesheet.css LICENSE "${STAGE_DIR}/"
+cp metadata.json extension.js seekBar.js stylesheet.css LICENSE "${STAGE_DIR}/"
 
 ( cd "${STAGE_DIR}" && zip -qr "${OUT_ZIP}" . )
 

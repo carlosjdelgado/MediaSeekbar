@@ -9,8 +9,9 @@ players that support it via MPRIS (Spotify, browsers, mpv, VLC, etc.).
 
 ![Media Seekbar](screenshot.png)
 
-It overrides `MediaMessage._update()` (via `InjectionManager`) to inject a bar
-into each media message, reads duration/trackid/`CanSeek` from the player's MPRIS
-proxy, polls `Position` once a second while playing, and calls `SetPosition`
-(fallback `Seek`) on release. The bar hides for tracks with no duration (radios /
-streams) and goes non-interactive when the player can't seek.
+It subscribes to MPRIS players on the session bus and attaches a seek bar to
+each media message in the date/notifications menu. Duration, track id and
+`CanSeek` are read from the player's MPRIS proxy; position is tracked from a
+local monotonic clock between state changes, and `SetPosition` is called over
+D-Bus on release. The bar hides for tracks with no duration (radios / streams)
+and goes non-interactive when the player can't seek.

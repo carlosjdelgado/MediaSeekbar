@@ -1,19 +1,14 @@
-.media-seek-bar {
+.seek-bar {
     spacing: 8px;
-    margin-top: 6px;
-    margin-bottom: 2px;
-    /* Match .message-box's 6px horizontal padding so times align with it. */
-    margin-left: 6px;
-    margin-right: 6px;
+    margin: 6px 6px 2px 6px;
 }
 
-.media-seek-bar .media-seek-time {
+.seek-timestamp {
     font-size: 0.85em;
     min-width: 40px;
-    /* Tabular figures so the times don't jitter. */
     font-feature-settings: "tnum";
 }
 
-.media-seek-bar .media-seek-slider {
+.seek-slider {
     min-height: 16px;
 }
