@@ -19,6 +19,7 @@ jobs:
           source-dir: .
           extra-source: |
             LICENSE
+            seekBar.js
           username: ${{ secrets.GNOME_USERNAME }}
           password: ${{ secrets.GNOME_PASSWORD }}
           accept-tos: true
