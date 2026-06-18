@@ -1,10 +1,14 @@
 .seek-bar {
     spacing: 8px;
-    margin: 4px 6px;
+    margin: 6px 6px 2px 6px;
 }
 
 .seek-timestamp {
     font-size: 0.85em;
     min-width: 40px;
     font-feature-settings: "tnum";
+}
+
+.seek-slider {
+    min-height: 16px;
 }

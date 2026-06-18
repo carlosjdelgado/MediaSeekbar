@@ -93,6 +93,7 @@ class SeekBar extends St.BoxLayout {
         });
         this._positionLabel = timeLabel();
         this._slider = new Slider(0);
+        this._slider.add_style_class_name('seek-slider');
         this._slider.x_expand = true;
         this._slider.y_align = Clutter.ActorAlign.CENTER;
         this._slider.connect('drag-begin', () => (this._dragging = true));
