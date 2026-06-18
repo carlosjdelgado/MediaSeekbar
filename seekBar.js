@@ -100,6 +100,7 @@ export class SeekBar extends St.BoxLayout {
         this._slider.connect('drag-end', () => {
             this._dragging = false;
             this._seek(this._slider.value);
+            this._positionLabel.text = formatTime(this._slider.value * this._length);
         });
         this._durationLabel = timeLabel();
 
@@ -133,12 +134,12 @@ export class SeekBar extends St.BoxLayout {
         this.visible = this._length > 0;
         this._durationLabel.text = formatTime(this._length);
         // VLC doesn't cache CanSeek
-        this._getProperty('CanSeek', canSeek => {
+        this._forwardProperty('CanSeek', canSeek => {
             this._canSeek = Boolean(canSeek);
             this._slider.reactive = this._canSeek;
         });
-        // also when paused (open / track change)
-        this._refreshPosition();
+        if (this._proxy.PlaybackStatus !== 'Playing')
+            this._refreshPosition();
     }
 
     // SetPosition isn't in the shell's XML
@@ -156,13 +157,13 @@ export class SeekBar extends St.BoxLayout {
     _refreshPosition() {
         if (this._dragging || this._length <= 0)
             return;
-        this._getProperty('Position', position => {
+        this._forwardProperty('Position', position => {
             this._positionLabel.text = formatTime(position);
             this._slider.value = Math.min(Math.max(position / this._length, 0), 1);
         });
     }
 
-    _getProperty(property, onValue) {
+    _forwardProperty(property, onValue) {
         this._proxy.get_connection().call(
             this._busName, MPRIS_PATH, 'org.freedesktop.DBus.Properties', 'Get',
             new GLib.Variant('(ss)', [PLAYER_IFACE, property]),
@@ -178,4 +179,5 @@ export class SeekBar extends St.BoxLayout {
             });
     }
 }
+
 GObject.registerClass(SeekBar);
