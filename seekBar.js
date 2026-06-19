@@ -31,6 +31,11 @@ export class SeekBarManager {
             '/org/freedesktop/DBus', 'org.mpris.MediaPlayer2',
             Gio.DBusSignalFlags.MATCH_ARG0_NAMESPACE,
             () => this._queueSync());
+
+        // a MediaMessage can be destroyed and recreated for the same bus
+        // (e.g. YouTube ad break) without NameOwnerChanged firing
+        this._childAddedId = this._messageView.connect('child-added',
+            () => this._queueSync());
     }
 
     // debounce; the MediaMessage shows up a bit after NameOwnerChanged
@@ -51,7 +56,8 @@ export class SeekBarManager {
             if (!busName)
                 continue;
             present.add(busName);
-            if (!this.bars[busName]) {
+            const existing = this.bars[busName];
+            if (!existing || existing.get_parent() !== message.get_child()) {
                 const bar = new SeekBar(busName);
                 message.get_child().add_child(bar);
                 this.bars[busName] = bar;
@@ -69,6 +75,8 @@ export class SeekBarManager {
             GLib.source_remove(this._syncId);
         if (this._nameOwnerId)
             Gio.DBus.session.signal_unsubscribe(this._nameOwnerId);
+        if (this._childAddedId)
+            this._messageView.disconnect(this._childAddedId);
         for (const bar of Object.values(this.bars))
             bar.destroy();
     }
@@ -130,8 +138,14 @@ export class SeekBar extends St.BoxLayout {
 
     _updateInfo() {
         const metadata = this._proxy.Metadata ?? {};
-        this._length = Number(metadata['mpris:length']?.deepUnpack?.()) || 0;
-        this._trackId = metadata['mpris:trackid']?.deepUnpack?.() ?? null;
+        const newLength = Number(metadata['mpris:length']?.deepUnpack?.()) || 0;
+        const newTrackId = metadata['mpris:trackid']?.deepUnpack?.() ?? null;
+        // Firefox/YouTube emit a transient Metadata without mpris:length on
+        // seek; ignore it so we don't blink the bar off and back on
+        if (newLength === 0 && newTrackId === this._trackId && this._length > 0)
+            return;
+        this._length = newLength;
+        this._trackId = newTrackId;
         this.visible = this._length > 0;
         this._durationLabel.text = formatTime(this._length);
         // VLC doesn't cache CanSeek
