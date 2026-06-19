@@ -27,9 +27,6 @@ jobs:
       - name: Build extension package
         run: bash pack.sh
 
-      - name: Run shexli (human-readable)
-        run: shexli --format text dist/mediaseekbar@carlosjdelgado.shell-extension.zip
-
       - name: Run shexli (gate on findings)
         run: |
           shexli --format json dist/mediaseekbar@carlosjdelgado.shell-extension.zip > shexli.json

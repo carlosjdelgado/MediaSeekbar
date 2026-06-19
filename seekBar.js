@@ -153,7 +153,14 @@ export class SeekBar extends St.BoxLayout {
             this._canSeek = Boolean(canSeek);
             this._slider.reactive = this._canSeek;
         });
-        this._resync();
+        // Position isn't in PropertiesChanged: pull it from DBus and snapshot
+        if (this._length > 0) {
+            this._forwardProperty('Position', position => {
+                this._basePosition = position;
+                this._baseAt = GLib.get_monotonic_time();
+                this._renderPosition();
+            });
+        }
     }
 
     // SetPosition isn't in the shell's XML
@@ -179,17 +186,6 @@ export class SeekBar extends St.BoxLayout {
         const position = this._basePosition + elapsed;
         this._positionLabel.text = formatTime(position);
         this._slider.value = Math.min(Math.max(position / this._length, 0), 1);
-    }
-
-    // Position isn't in PropertiesChanged: pull it from DBus and snapshot
-    _resync() {
-        if (this._length <= 0)
-            return;
-        this._forwardProperty('Position', position => {
-            this._basePosition = position;
-            this._baseAt = GLib.get_monotonic_time();
-            this._renderPosition();
-        });
     }
 
     _forwardProperty(property, onValue) {
