@@ -111,11 +111,14 @@ export class SeekBar extends St.BoxLayout {
 
         this._proxy = MprisPlayerProxy(Gio.DBus.session, busName, MPRIS_PATH,
             () => this._onProxyReady());
-        this.connect('destroy', () => {
-            if (this._timerId)
-                GLib.source_remove(this._timerId);
-            this._proxy.disconnectObject(this);
-        });
+    }
+
+    destroy() {
+        if (this._timerId)
+            GLib.source_remove(this._timerId);
+        this._proxy.disconnectObject(this);
+
+        super.destroy();
     }
 
     _onProxyReady() {
