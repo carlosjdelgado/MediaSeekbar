@@ -4,6 +4,12 @@ All notable changes to this project are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/), versions follow the
 extension's `version-name`.
 
+## [1.1.1]
+
+### Changed
+- `SeekBar` cleanup runs in a `destroy()` override instead of a `destroy`
+  signal handler, per EGO reviewer feedback.
+
 ## [1.1.0]
 
 ### Changed
