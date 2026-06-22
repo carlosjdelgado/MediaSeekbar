@@ -31,6 +31,11 @@ export class SeekBarManager {
             '/org/freedesktop/DBus', 'org.mpris.MediaPlayer2',
             Gio.DBusSignalFlags.MATCH_ARG0_NAMESPACE,
             () => this._queueSync());
+
+        // a MediaMessage can be destroyed and recreated for the same bus
+        // (e.g. YouTube ad break) without NameOwnerChanged firing
+        this._childAddedId = this._messageView.connect('child-added',
+            () => this._queueSync());
     }
 
     // debounce; the MediaMessage shows up a bit after NameOwnerChanged
@@ -51,7 +56,8 @@ export class SeekBarManager {
             if (!busName)
                 continue;
             present.add(busName);
-            if (!this.bars[busName]) {
+            const existing = this.bars[busName];
+            if (!existing || existing.get_parent() !== message.get_child()) {
                 const bar = new SeekBar(busName);
                 message.get_child().add_child(bar);
                 this.bars[busName] = bar;
@@ -69,6 +75,8 @@ export class SeekBarManager {
             GLib.source_remove(this._syncId);
         if (this._nameOwnerId)
             Gio.DBus.session.signal_unsubscribe(this._nameOwnerId);
+        if (this._childAddedId)
+            this._messageView.disconnect(this._childAddedId);
         for (const bar of Object.values(this.bars))
             bar.destroy();
     }
@@ -76,7 +84,7 @@ export class SeekBarManager {
 
 export class SeekBar extends St.BoxLayout {
     _init(busName) {
-        super._init({style_class: 'seek-bar', x_expand: true});
+        super._init({style_class: 'seek-bar', x_expand: true, visible: false});
 
         this._busName = busName;
         this._length = 0;
@@ -134,7 +142,9 @@ export class SeekBar extends St.BoxLayout {
     _updateInfo() {
         const metadata = this._proxy.Metadata ?? {};
         const trackId = metadata['mpris:trackid']?.deepUnpack?.() ?? null;
-        const length = Number(metadata['mpris:length']?.deepUnpack?.()) || 0;
+        // Chrome reports INT64_MAX for livestreams; treat as unknown length
+        const rawLength = Number(metadata['mpris:length']?.deepUnpack?.());
+        const length = rawLength < Number.MAX_SAFE_INTEGER ? rawLength : 0;
         // Firefox emits a transient Metadata without mpris:length on seek
         if (length === 0 && trackId === this._trackId)
             return;
