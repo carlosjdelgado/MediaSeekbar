@@ -4,6 +4,16 @@ All notable changes to this project are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/), versions follow the
 extension's `version-name`.
 
+## [1.1.3]
+
+### Fixed
+- Seek bar no longer disappears after YouTube ad breaks in Chromium-based
+  browsers: re-parents itself when the `MediaMessage` is destroyed and
+  recreated for the same MPRIS bus.
+- Seek bar no longer shows with a broken `0:00` duration for livestreams in
+  Chromium-based browsers: `mpris:length` reported as `INT64_MAX` is now
+  treated as unknown length and the bar is hidden.
+
 ## [1.1.2]
 
 ### Fixed
