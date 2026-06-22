@@ -133,8 +133,13 @@ export class SeekBar extends St.BoxLayout {
 
     _updateInfo() {
         const metadata = this._proxy.Metadata ?? {};
-        this._length = Number(metadata['mpris:length']?.deepUnpack?.()) || 0;
-        this._trackId = metadata['mpris:trackid']?.deepUnpack?.() ?? null;
+        const trackId = metadata['mpris:trackid']?.deepUnpack?.() ?? null;
+        const length = Number(metadata['mpris:length']?.deepUnpack?.()) || 0;
+        // Firefox emits a transient Metadata without mpris:length on seek
+        if (length === 0 && trackId === this._trackId)
+            return;
+        this._length = length;
+        this._trackId = trackId;
         this.visible = this._length > 0;
         this._durationLabel.text = formatTime(this._length);
         // VLC doesn't cache CanSeek

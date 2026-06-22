@@ -4,6 +4,13 @@ All notable changes to this project are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/), versions follow the
 extension's `version-name`.
 
+## [1.1.2]
+
+### Fixed
+- Seek bar no longer disappears when seeking in Firefox: a transient
+  `Metadata` without `mpris:length` for the same `mpris:trackid` is now
+  ignored.
+
 ## [1.1.1]
 
 ### Changed
