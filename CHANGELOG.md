@@ -4,6 +4,12 @@ All notable changes to this project are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/), versions follow the
 extension's `version-name`.
 
+## [1.1.4]
+
+### Added
+- The position label now updates in real time while dragging the slider handle,
+  instead of only after releasing it. The actual seek is still issued on release.
+
 ## [1.1.3]
 
 ### Fixed
