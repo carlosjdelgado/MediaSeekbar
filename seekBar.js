@@ -111,6 +111,10 @@ export class SeekBar extends St.BoxLayout {
             this._dragging = false;
             this._seek(this._slider.value);
         });
+        this._slider.connect('notify::value', () => {
+            if (this._dragging && this._length > 0)
+                this._positionLabel.text = formatTime(this._slider.value * this._length);
+        });
         this._durationLabel = timeLabel();
 
         this.add_child(this._positionLabel);
