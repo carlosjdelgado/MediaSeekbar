@@ -3,7 +3,7 @@
 [![GNOME Extensions Version](https://img.shields.io/gnome-extensions/v/mediaseekbar@carlosjdelgado)](https://extensions.gnome.org/extension/10234/media-seekbar/)
 [![GNOME Extensions Downloads](https://img.shields.io/gnome-extensions/dt/mediaseekbar@carlosjdelgado)](https://extensions.gnome.org/extension/10234/media-seekbar/)
 
-GNOME Shell **48–50** extension that adds a progress (seek) bar with elapsed and
+GNOME Shell **48–51** extension that adds a progress (seek) bar with elapsed and
 total time to the media controls in the date/notifications menu. Drag to seek on
 players that support it via MPRIS (Spotify, browsers, mpv, VLC, etc.).
 
