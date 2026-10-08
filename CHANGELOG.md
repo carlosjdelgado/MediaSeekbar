@@ -4,6 +4,11 @@ All notable changes to this project are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/), versions follow the
 extension's `version-name`.
 
+## [1.2.0]
+
+### Added
+- Support for GNOME Shell 51.
+
 ## [1.1.4]
 
 ### Added
